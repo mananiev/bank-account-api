@@ -75,6 +75,11 @@ func (s *Service) Transfer(ctx context.Context, from, to uuid.UUID, amount int64
 	})
 }
 
+// ListTransactions returns the account's transactions, newest first.
+func (s *Service) ListTransactions(ctx context.Context, accountID uuid.UUID) ([]Transaction, error) {
+	return s.repo.ListTransactions(ctx, accountID)
+}
+
 func validateIdempotencyKey(key string) error {
 	if key == "" || utf8.RuneCountInString(key) > MaxIdempotencyKeyLength {
 		return fmt.Errorf("%w: Idempotency-Key header is required and must be 1-%d characters",

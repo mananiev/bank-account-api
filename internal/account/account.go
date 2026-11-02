@@ -89,4 +89,7 @@ type Repository interface {
 	// the same replay semantics as Deposit. It returns ErrTransferAccountNotFound
 	// or ErrInsufficientFunds when the transfer cannot be applied.
 	Transfer(ctx context.Context, in TransferInput) (Transaction, error)
+	// ListTransactions returns the account's transactions, newest first, or
+	// ErrNotFound if the account does not exist.
+	ListTransactions(ctx context.Context, accountID uuid.UUID) ([]Transaction, error)
 }

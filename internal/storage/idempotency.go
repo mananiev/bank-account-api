@@ -54,25 +54,34 @@ func replay(ctx context.Context, tx pgx.Tx, key, requestHash string) (account.Tr
 	if err != nil {
 		return account.Transaction{}, fmt.Errorf("load ledger entries: %w", err)
 	}
-	type entry struct {
-		accountID uuid.UUID
-		amount    int64
-	}
-	entries, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (entry, error) {
-		var e entry
+	entries, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ledgerEntry, error) {
+		var e ledgerEntry
 		err := row.Scan(&e.accountID, &e.amount)
 		return e, err
 	})
 	if err != nil {
 		return account.Transaction{}, fmt.Errorf("load ledger entries: %w", err)
 	}
+	return withAccounts(t, dbType, entries)
+}
 
+type ledgerEntry struct {
+	accountID uuid.UUID
+	amount    int64
+}
+
+// withAccounts sets the transaction's type and account fields from its ledger
+// entries: one entry for opening and deposit; two for transfer, where the
+// debit (negative entry) is the source and the credit the destination.
+func withAccounts(t account.Transaction, dbType string, entries []ledgerEntry) (account.Transaction, error) {
 	switch {
+	case dbType == "OPENING" && len(entries) == 1:
+		t.Type = account.TypeOpening
+		t.AccountID = entries[0].accountID
 	case dbType == "DEPOSIT" && len(entries) == 1:
 		t.Type = account.TypeDeposit
 		t.AccountID = entries[0].accountID
 	case dbType == "TRANSFER" && len(entries) == 2:
-		// The debit (negative entry) is the source, the credit the destination.
 		t.Type = account.TypeTransfer
 		for _, e := range entries {
 			if e.amount < 0 {

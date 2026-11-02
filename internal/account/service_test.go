@@ -34,6 +34,11 @@ func (r unreachableRepo) Transfer(context.Context, account.TransferInput) (accou
 	return account.Transaction{}, nil
 }
 
+func (r unreachableRepo) ListTransactions(context.Context, uuid.UUID) ([]account.Transaction, error) {
+	r.t.Fatal("repository must not be called")
+	return nil, nil
+}
+
 // recordingRepo captures the input the service passes to storage.
 type recordingRepo struct {
 	unreachableRepo

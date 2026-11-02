@@ -60,7 +60,14 @@ A test runs many concurrent transfers in both directions between the same accoun
 | `GET /v1/accounts/{id}` | — | `200` + account | `400` invalid UUID, `404` not found |
 | `POST /v1/accounts/{id}/deposits` | `{"amount":5000}` + `Idempotency-Key` header | `201` + transaction | `400` bad JSON / missing key, `404` account not found, `422` amount ≤ 0 or balance overflow, `409` key reused with a different request |
 | `POST /v1/transfers` | `{"from_account_id":"…","to_account_id":"…","amount":2500}` + `Idempotency-Key` | `201` + transaction | `400` bad JSON / missing or malformed account ID / missing key, `422` `account_not_found` / `insufficient_funds` / `same_account` / `invalid_amount`, `409` key reused with a different request |
-| `GET /v1/accounts/{id}/transactions` (optional) | — | `200` + list, newest first | `400` invalid UUID, `404` not found |
+| `GET /v1/accounts/{id}/transactions` | — | `200` + `{"transactions":[…]}`, newest first | `400` invalid UUID, `404` not found |
+
+**Transaction list (FR3)**
+
+- The list is **wrapped in an object** (`{"transactions":[…]}`) so pagination fields such as a cursor can be added later without breaking clients. A bare array cannot grow.
+- **Items use the same shapes** the deposit and transfer endpoints return (`account_id` for opening and deposit; `from_account_id` / `to_account_id` for transfers; amounts always positive). Clients tell direction by comparing `from_account_id` with the account. An account-centric view with signed amounts would suit a statement UI better, but would introduce a second representation of the same transaction.
+- **The opening balance is included** (type `opening`), so the listed movements add up to the current balance.
+- **No pagination** (out of scope): the full history is returned. Cursor pagination on `(created_at, id)` would be the first addition; the `(account_id, created_at DESC, id DESC)` index already matches that order. Capping the list without pagination was rejected because it would silently hide history.
 
 **API design choices**
 
