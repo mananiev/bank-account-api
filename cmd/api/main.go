@@ -41,6 +41,10 @@ func run() error {
 	}
 	defer db.Close()
 
+	if err := db.Migrate(ctx, logger); err != nil {
+		return err
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           httpapi.NewRouter(logger, db),
