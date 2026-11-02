@@ -7,7 +7,7 @@ ifeq ($(RACE),1)
 TEST_FLAGS := -race
 endif
 
-.PHONY: build run test lint
+.PHONY: build run test test-unit lint
 
 build:
 	go build -o $(BIN) ./cmd/api
@@ -15,8 +15,13 @@ build:
 run:
 	go run ./cmd/api
 
+# All tests. Integration tests start PostgreSQL via testcontainers (Docker required).
 test:
 	go test $(TEST_FLAGS) ./...
+
+# Unit tests only; no Docker needed.
+test-unit:
+	go test $(TEST_FLAGS) -short ./...
 
 lint:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...

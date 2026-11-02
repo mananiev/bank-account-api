@@ -3,10 +3,11 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/mananiev/bank-account-api/internal/account"
 )
 
 // Pinger reports whether a dependency (the database) is reachable.
@@ -15,10 +16,19 @@ type Pinger interface {
 }
 
 // NewRouter builds the HTTP handler with all routes registered.
-func NewRouter(logger *slog.Logger, db Pinger) http.Handler {
+func NewRouter(logger *slog.Logger, db Pinger, accounts *account.Service) http.Handler {
+	h := &handlers{logger: logger, accounts: accounts}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz(logger, db))
+	mux.HandleFunc("POST /v1/accounts", h.createAccount)
+	mux.HandleFunc("GET /v1/accounts/{id}", h.getAccount)
 	return mux
+}
+
+type handlers struct {
+	logger   *slog.Logger
+	accounts *account.Service
 }
 
 func healthz(logger *slog.Logger, db Pinger) http.HandlerFunc {
@@ -33,10 +43,4 @@ func healthz(logger *slog.Logger, db Pinger) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }

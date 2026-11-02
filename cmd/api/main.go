@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mananiev/bank-account-api/internal/account"
 	"github.com/mananiev/bank-account-api/internal/config"
 	"github.com/mananiev/bank-account-api/internal/httpapi"
 	"github.com/mananiev/bank-account-api/internal/storage"
@@ -47,7 +48,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(logger, db),
+		Handler:           httpapi.NewRouter(logger, db, account.NewService(db)),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
