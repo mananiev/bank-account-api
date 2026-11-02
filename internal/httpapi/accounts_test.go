@@ -40,12 +40,20 @@ func newServer(t *testing.T) (http.Handler, *testdb.DB) {
 
 func do(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	return doWithHeaders(t, h, method, path, body, nil)
+}
+
+func doWithHeaders(t *testing.T, h http.Handler, method, path, body string, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
 	var req *http.Request
 	if body == "" {
 		req = httptest.NewRequestWithContext(t.Context(), method, path, nil)
 	} else {
 		req = httptest.NewRequestWithContext(t.Context(), method, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

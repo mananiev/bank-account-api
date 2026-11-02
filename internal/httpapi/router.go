@@ -23,6 +23,7 @@ func NewRouter(logger *slog.Logger, db Pinger, accounts *account.Service) http.H
 	mux.HandleFunc("GET /healthz", healthz(logger, db))
 	mux.HandleFunc("POST /v1/accounts", h.createAccount)
 	mux.HandleFunc("GET /v1/accounts/{id}", h.getAccount)
+	mux.HandleFunc("POST /v1/accounts/{id}/deposits", h.createDeposit)
 	return mux
 }
 

@@ -43,8 +43,10 @@ A test runs many concurrent transfers in both directions between the same accoun
 
 ### Idempotency
 
-- `Idempotency-Key` is **required** on deposits and transfers; a missing key returns `400`.
-- Keys are unique across all operations. The stored `request_hash` covers the operation type, the target and the request body, so reusing a key for a different request (including a deposit key reused for a transfer) returns `409`.
+- `Idempotency-Key` is **required** on deposits and transfers: any string of 1–255 characters (clients are advised to use UUIDs). A missing or invalid key returns `400`.
+- Keys are unique across all operations. The stored `request_hash` is a SHA-256 of the **parsed** request (operation type, account IDs, amount), not the raw body, so a retry with different whitespace or field order is still recognised as the same request. Reusing a key for a different request (including a deposit key reused for a transfer) returns `409`.
+- Keys are **kept forever**: they live on the transaction row, which is never deleted. Production systems often expire keys (e.g. after 24 hours) so they can be reused and the index stays bounded; that would need a separate keys table.
+- **Idempotency is implemented in the storage transaction, not as HTTP middleware.** Claiming the key and moving the money must commit or roll back together. A generic middleware caching responses would need its own table and handling for requests still in progress, and could still record a key whose money movement failed.
 - A replay with the same key and the same request returns the **original status and body** (`201` + the stored transaction).
 - Only successful operations are recorded. A request rejected by a business rule (e.g. insufficient funds) stores nothing, so the client can retry it with the same key once the condition changes.
 - Concurrent requests with the same key are safe: the second insert waits on the unique index until the first commits, gets a conflict, and returns the stored result.
@@ -56,7 +58,7 @@ A test runs many concurrent transfers in both directions between the same accoun
 | --- | --- | --- | --- |
 | `POST /v1/accounts` | `{"initial_balance":0}` | `201` + account, `Location` header | `400` bad JSON, `422` negative balance |
 | `GET /v1/accounts/{id}` | — | `200` + account | `400` invalid UUID, `404` not found |
-| `POST /v1/accounts/{id}/deposits` | `{"amount":5000}` + `Idempotency-Key` header | `201` + transaction | `400` bad JSON / missing key, `404` account not found, `422` amount ≤ 0, `409` key reused with a different request |
+| `POST /v1/accounts/{id}/deposits` | `{"amount":5000}` + `Idempotency-Key` header | `201` + transaction | `400` bad JSON / missing key, `404` account not found, `422` amount ≤ 0 or balance overflow, `409` key reused with a different request |
 | `POST /v1/transfers` | `{"from_account_id":"…","to_account_id":"…","amount":2500}` + `Idempotency-Key` | `201` + transaction | `400` bad JSON / missing key, `422` account not found / insufficient funds / same account / amount ≤ 0, `409` key reused with a different request |
 | `GET /v1/accounts/{id}/transactions` (optional) | — | `200` + list, newest first | `400` invalid UUID, `404` not found |
 

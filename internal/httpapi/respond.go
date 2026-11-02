@@ -87,6 +87,10 @@ func (h *handlers) writeError(w http.ResponseWriter, r *http.Request, err error)
 		status, code = http.StatusUnprocessableEntity, "invalid_amount"
 	case errors.Is(err, account.ErrNotFound):
 		status, code = http.StatusNotFound, "account_not_found"
+	case errors.Is(err, account.ErrInvalidIdempotencyKey):
+		status, code = http.StatusBadRequest, "invalid_idempotency_key"
+	case errors.Is(err, account.ErrIdempotencyKeyReused):
+		status, code = http.StatusConflict, "idempotency_key_reused"
 	default:
 		h.logger.ErrorContext(r.Context(), "request failed", "method", r.Method, "path", r.URL.Path, "err", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{errorDetail{
