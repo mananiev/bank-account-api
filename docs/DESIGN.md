@@ -6,14 +6,14 @@
 | --- | --- | --- |
 | `accounts` | id (UUID), balance (BIGINT, `CHECK (balance >= 0)`), created\_at | Current state, fast to read |
 | `transactions` | id (UUID), type (OPENING / DEPOSIT / TRANSFER), amount (BIGINT, `CHECK (amount > 0)`), idempotency\_key (UNIQUE, NULL for OPENING), request\_hash, created\_at | One row per money movement |
-| `ledger_entries` | id, transaction\_id (FK), account\_id (FK), amount (signed BIGINT, non-zero), created\_at | The audit trail: + for credit, − for debit. Indexed on `(account_id, created_at DESC)` for the transaction list |
+| `ledger_entries` | id, transaction\_id (FK), account\_id (FK), amount (signed BIGINT, non-zero), created\_at | The audit trail: + for credit, − for debit. Indexed on `(account_id, created_at DESC, id DESC)` for the transaction list |
 
 **Balance column and ledger entries**
 
 - The **ledger** is the source of truth and the audit trail. Every balance change is an immutable row, so any balance can be explained and recalculated as the sum of its entries.
 - The **balance column** keeps reads fast and gives the database a row to lock and a constraint to enforce (`balance >= 0`). Without it, every request would sum all entries, and overdrafts could not be prevented with a simple CHECK constraint.
-- **Trade-off:** the balance is duplicated data that must stay in sync with the ledger. Both are always written in the same database transaction, and a test verifies `balance = SUM(entries)` for every account.
-- **Immutability is enforced by the database:** a trigger rejects any `UPDATE` or `DELETE` on `ledger_entries`.
+- **Trade-off:** the balance is duplicated data that must stay in sync with the ledger. Both are always written in the same database transaction, and the tests that move money assert `balance = SUM(entries)` for the accounts involved.
+- **Immutability is enforced by the database:** a trigger rejects any `UPDATE`, `DELETE` or `TRUNCATE` on `ledger_entries` (covered by a test). Limits: the `transactions` table itself is not protected, and the application connects as a role that could disable the trigger. Production would use separate migration and runtime roles, with `UPDATE` and `DELETE` revoked from the runtime role.
 - **Initial balance:** a non-zero initial balance is recorded as an `OPENING` transaction with one ledger entry, in the same database transaction that creates the account. Every balance change, including the first, is therefore in the ledger.
 - **Double-entry:** a transfer writes two entries (−100 on the source, +100 on the target) that sum to zero, following double-entry bookkeeping.
 - **Simplification:** deposits and opening balances write a single entry, so the books do not fully balance. Strict double-entry would debit a system "external funds" account. This is a deliberate simplification to revisit.
@@ -72,9 +72,9 @@ A test runs many concurrent transfers in both directions between the same accoun
 **API design choices**
 
 - **Deposits are nested under the account** because a deposit belongs to exactly one account. **Transfers are top-level** because they involve two accounts equally and are a resource in their own right.
-- **Movements are nouns created with POST**, not actions like `/transfer-money`. Each deposit or transfer is an addressable resource.
+- **Movements are nouns created with POST**, not actions like `/transfer-money`. Each creates a transaction with its own ID. Fetching a single transaction (`GET /v1/transfers/{id}`, with a `Location` header on creation) is not implemented; transactions are visible through the account's transaction list.
 - **400 vs 422:** `400` means the request is malformed (invalid JSON, wrong types, missing required header). `422` means the request is well-formed but a business rule rejects it. Insufficient funds is a `422`; `409` is a common alternative.
 - **Missing accounts in a transfer return 422, not 404:** the `/v1/transfers` resource exists; an unknown account ID in the body is invalid input to it. `404` is reserved for a resource in the URL path that does not exist (as in the deposit route). The error code is the same `account_not_found` used elsewhere; the message names the side (source or destination).
 - **A missing or malformed account ID in a transfer body is a `400`**, following the 400-vs-422 rule: the request is malformed. An ID that is well-formed but unknown is a `422`.
-- **Errors** have one consistent shape: `{"error":{"code":"insufficient_funds","message":"…"}}`. Clients branch on `code`, never on the message text.
+- **Errors** have one consistent shape: `{"error":{"code":"insufficient_funds","message":"…"}}`. Clients branch on `code`, never on the message text. This includes routing errors: unknown paths return `404 route_not_found` and wrong methods `405 method_not_allowed` (with an `Allow` header) instead of the standard library's plain-text responses.
 - **`/v1/` prefix** allows breaking changes to be introduced under a new version without affecting existing clients.

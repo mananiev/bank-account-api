@@ -39,11 +39,13 @@ func (s *Service) GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
 
 // Deposit adds amount to the account, at most once per idempotency key.
 func (s *Service) Deposit(ctx context.Context, accountID uuid.UUID, amount int64, idempotencyKey string) (Transaction, error) {
-	if amount <= 0 {
-		return Transaction{}, fmt.Errorf("%w: amount must be positive", ErrInvalidAmount)
-	}
+	// The key is checked first: a malformed request (400) is reported before
+	// business rule violations (422).
 	if err := validateIdempotencyKey(idempotencyKey); err != nil {
 		return Transaction{}, err
+	}
+	if amount <= 0 {
+		return Transaction{}, fmt.Errorf("%w: amount must be positive", ErrInvalidAmount)
 	}
 
 	return s.repo.Deposit(ctx, DepositInput{
@@ -56,14 +58,14 @@ func (s *Service) Deposit(ctx context.Context, accountID uuid.UUID, amount int64
 
 // Transfer moves amount between two accounts, at most once per idempotency key.
 func (s *Service) Transfer(ctx context.Context, from, to uuid.UUID, amount int64, idempotencyKey string) (Transaction, error) {
+	if err := validateIdempotencyKey(idempotencyKey); err != nil {
+		return Transaction{}, err
+	}
 	if from == to {
 		return Transaction{}, ErrSameAccount
 	}
 	if amount <= 0 {
 		return Transaction{}, fmt.Errorf("%w: amount must be positive", ErrInvalidAmount)
-	}
-	if err := validateIdempotencyKey(idempotencyKey); err != nil {
-		return Transaction{}, err
 	}
 
 	return s.repo.Transfer(ctx, TransferInput{
@@ -81,8 +83,9 @@ func (s *Service) ListTransactions(ctx context.Context, accountID uuid.UUID) ([]
 }
 
 func validateIdempotencyKey(key string) error {
-	if key == "" || utf8.RuneCountInString(key) > MaxIdempotencyKeyLength {
-		return fmt.Errorf("%w: Idempotency-Key header is required and must be 1-%d characters",
+	// HTTP allows non-UTF-8 bytes in header values; the key is stored as UTF-8 text.
+	if key == "" || !utf8.ValidString(key) || utf8.RuneCountInString(key) > MaxIdempotencyKeyLength {
+		return fmt.Errorf("%w: Idempotency-Key header is required and must be 1-%d UTF-8 characters",
 			ErrInvalidIdempotencyKey, MaxIdempotencyKeyLength)
 	}
 	return nil

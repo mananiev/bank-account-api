@@ -198,6 +198,19 @@ func TestCreateAccountRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestInvalidRequestMessagesUseJSONTypes(t *testing.T) {
+	t.Parallel()
+	h, _ := newServer(t)
+
+	rec := do(t, h, http.MethodPost, "/v1/accounts", `{"initial_balance":10.5}`)
+	body := rec.Body.String()
+
+	assertErrorCode(t, rec, http.StatusBadRequest, "invalid_request")
+	if !strings.Contains(body, `\"initial_balance\" must be an integer`) || strings.Contains(body, "int64") {
+		t.Errorf("message %s should say the field must be an integer, without Go type names", body)
+	}
+}
+
 func TestGetAccount(t *testing.T) {
 	t.Parallel()
 	h, _ := newServer(t)

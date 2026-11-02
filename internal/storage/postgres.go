@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Postgres is the PostgreSQL-backed store. It will implement the repository
+// Postgres is the PostgreSQL-backed store. It implements the repository
 // interface declared by package account.
 type Postgres struct {
 	pool *pgxpool.Pool

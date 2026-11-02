@@ -70,6 +70,7 @@ func TestTransferRejectsInvalidInput(t *testing.T) {
 		{"negative amount", a, b, -1, "key", account.ErrInvalidAmount},
 		{"empty key", a, b, 100, "", account.ErrInvalidIdempotencyKey},
 		{"key longer than 255 characters", a, b, 100, strings.Repeat("k", 256), account.ErrInvalidIdempotencyKey},
+		{"missing key is reported before same account", a, a, 100, "", account.ErrInvalidIdempotencyKey},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -127,6 +128,8 @@ func TestDepositRejectsInvalidInput(t *testing.T) {
 		{"negative amount", -1, "key", account.ErrInvalidAmount},
 		{"empty key", 100, "", account.ErrInvalidIdempotencyKey},
 		{"key longer than 255 characters", 100, strings.Repeat("k", 256), account.ErrInvalidIdempotencyKey},
+		{"key not valid UTF-8", 100, "key-\xff", account.ErrInvalidIdempotencyKey},
+		{"missing key is reported before invalid amount", 0, "", account.ErrInvalidIdempotencyKey},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

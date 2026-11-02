@@ -6,10 +6,13 @@ import (
 	"github.com/google/uuid"
 )
 
+// Account IDs are decoded as strings and parsed here, so errors can name the
+// field ("from_account_id must be a UUID") instead of surfacing a generic
+// decoder message.
 type transferRequest struct {
-	FromAccountID uuid.UUID `json:"from_account_id"`
-	ToAccountID   uuid.UUID `json:"to_account_id"`
-	Amount        int64     `json:"amount"`
+	FromAccountID string `json:"from_account_id"`
+	ToAccountID   string `json:"to_account_id"`
+	Amount        int64  `json:"amount"`
 }
 
 func (h *handlers) createTransfer(w http.ResponseWriter, r *http.Request) {
@@ -18,19 +21,32 @@ func (h *handlers) createTransfer(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
-	if req.FromAccountID == uuid.Nil {
-		h.writeError(w, r, badRequest("invalid_request", "from_account_id is required"))
+	from, err := parseAccountID("from_account_id", req.FromAccountID)
+	if err != nil {
+		h.writeError(w, r, err)
 		return
 	}
-	if req.ToAccountID == uuid.Nil {
-		h.writeError(w, r, badRequest("invalid_request", "to_account_id is required"))
+	to, err := parseAccountID("to_account_id", req.ToAccountID)
+	if err != nil {
+		h.writeError(w, r, err)
 		return
 	}
 
-	t, err := h.accounts.Transfer(r.Context(), req.FromAccountID, req.ToAccountID, req.Amount, r.Header.Get(idempotencyKeyHeader))
+	t, err := h.accounts.Transfer(r.Context(), from, to, req.Amount, r.Header.Get(idempotencyKeyHeader))
 	if err != nil {
 		h.writeError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, toTransactionResponse(t))
+}
+
+func parseAccountID(field, value string) (uuid.UUID, error) {
+	if value == "" {
+		return uuid.Nil, badRequest("invalid_request", field+" is required")
+	}
+	id, err := uuid.Parse(value)
+	if err != nil {
+		return uuid.Nil, badRequest("invalid_request", field+" must be a UUID")
+	}
+	return id, nil
 }

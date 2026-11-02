@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -123,8 +124,12 @@ func TestTransferRejectsInvalidInput(t *testing.T) {
 		{"unknown destination", uuid.NewString(), transferJSON(a.ID, unknown, 100), http.StatusUnprocessableEntity, "account_not_found", "destination"},
 		{"missing source", uuid.NewString(), fmt.Sprintf(`{"to_account_id":%q,"amount":100}`, b.ID), http.StatusBadRequest, "invalid_request", "from_account_id"},
 		{"missing destination", uuid.NewString(), fmt.Sprintf(`{"from_account_id":%q,"amount":100}`, a.ID), http.StatusBadRequest, "invalid_request", "to_account_id"},
-		{"malformed account id", uuid.NewString(), fmt.Sprintf(`{"from_account_id":"nope","to_account_id":%q,"amount":100}`, b.ID), http.StatusBadRequest, "invalid_request", ""},
+		{"malformed source id", uuid.NewString(), fmt.Sprintf(`{"from_account_id":"nope","to_account_id":%q,"amount":100}`, b.ID), http.StatusBadRequest, "invalid_request", "from_account_id must be a UUID"},
+		{"malformed destination id", uuid.NewString(), fmt.Sprintf(`{"from_account_id":%q,"to_account_id":"nope","amount":100}`, a.ID), http.StatusBadRequest, "invalid_request", "to_account_id must be a UUID"},
 		{"missing idempotency key", "", transferJSON(a.ID, b.ID, 100), http.StatusBadRequest, "invalid_idempotency_key", ""},
+		{"missing key is reported before same account", "", transferJSON(a.ID, a.ID, 100), http.StatusBadRequest, "invalid_idempotency_key", ""},
+		{"account id of wrong JSON type", uuid.NewString(), fmt.Sprintf(`{"from_account_id":123,"to_account_id":%q,"amount":100}`, b.ID), http.StatusBadRequest, "invalid_request", `\"from_account_id\" must be a string`},
+		{"duplicate amount", uuid.NewString(), fmt.Sprintf(`{"from_account_id":%q,"to_account_id":%q,"amount":1,"amount":900}`, a.ID, b.ID), http.StatusBadRequest, "invalid_request", "duplicate field"},
 		{"malformed JSON", uuid.NewString(), `{"amount":`, http.StatusBadRequest, "invalid_request", ""},
 		{"unknown field", uuid.NewString(), `{"amount":1,"currency":"EUR"}`, http.StatusBadRequest, "invalid_request", ""},
 	}
@@ -317,4 +322,54 @@ func TestConcurrentTransfersWithSameKeyTransferOnce(t *testing.T) {
 	}
 	db.AssertLedgerConsistent(t, from.ID)
 	db.AssertLedgerConsistent(t, to.ID)
+}
+
+func TestTransferRejectsDestinationOverflow(t *testing.T) {
+	t.Parallel()
+	h, db := newServer(t)
+	from, to := createAccount(t, h, 10), createAccount(t, h, math.MaxInt64)
+
+	rec := transfer(t, h, uuid.NewString(), transferJSON(from.ID, to.ID, 1))
+
+	assertErrorCode(t, rec, http.StatusUnprocessableEntity, "invalid_amount")
+	if bal := getBalance(t, h, from.ID); bal != 10 {
+		t.Errorf("source balance = %d, want 10 (rolled back)", bal)
+	}
+	db.AssertLedgerConsistent(t, from.ID)
+	db.AssertLedgerConsistent(t, to.ID)
+}
+
+// The hardest idempotency path: concurrent requests share a key and the
+// request holding it fails. Each waiter must then claim the key itself (the
+// failed claim was rolled back) and get its own business error, not a 500 or
+// a replay of a result that was never stored.
+func TestConcurrentFailingTransfersWithSameKeyStoreNothing(t *testing.T) {
+	t.Parallel()
+	h, db := newServer(t)
+	from, to := createAccount(t, h, 0), createAccount(t, h, 0)
+	key := uuid.NewString()
+
+	const n = 20
+	keys, bodies := make([]string, n), make([]string, n)
+	for i := range n {
+		keys[i] = key
+		bodies[i] = transferJSON(from.ID, to.ID, 100)
+	}
+
+	for _, rec := range runConcurrently(t, h, keys, bodies) {
+		assertErrorCode(t, rec, http.StatusUnprocessableEntity, "insufficient_funds")
+	}
+
+	var stored int
+	if err := db.Pool.QueryRow(t.Context(),
+		`SELECT COUNT(*) FROM transactions WHERE idempotency_key = $1`, key).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != 0 {
+		t.Errorf("%d transactions stored under the key, want 0", stored)
+	}
+
+	// The key is still free once the transfer can succeed.
+	assertStatus(t, deposit(t, h, from.ID.String(), uuid.NewString(), `{"amount":100}`), http.StatusCreated)
+	assertStatus(t, transfer(t, h, key, transferJSON(from.ID, to.ID, 100)), http.StatusCreated)
 }

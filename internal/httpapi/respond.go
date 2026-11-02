@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/mananiev/bank-account-api/internal/account"
@@ -26,22 +28,80 @@ func badRequest(code, message string) error {
 }
 
 // decodeJSON strictly decodes the request body into dst: unknown fields,
-// trailing data and bodies over 1 MB are rejected. With allowEmpty, an empty
-// body leaves dst at its zero value.
+// duplicate fields, trailing data and bodies over 1 MB are rejected. With
+// allowEmpty, an empty body leaves dst at its zero value.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any, allowEmpty bool) error {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
-	dec.DisallowUnknownFields()
-
-	if err := dec.Decode(dst); err != nil {
-		if errors.Is(err, io.EOF) && allowEmpty {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	if err != nil {
+		return badRequest("invalid_request", invalidJSONMessage(err))
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		if allowEmpty {
 			return nil
 		}
+		return badRequest("invalid_request", "request body is required")
+	}
+	if field, ok := duplicateField(body); ok {
+		return badRequest("invalid_request", fmt.Sprintf("duplicate field %q", field))
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
 		return badRequest("invalid_request", invalidJSONMessage(err))
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return badRequest("invalid_request", "request body must contain a single JSON object")
 	}
 	return nil
+}
+
+// duplicateField reports a field that appears more than once in a top-level
+// JSON object. encoding/json silently keeps the last occurrence, so
+// {"amount":1,"amount":7} would otherwise move 7. Field names are compared
+// case-insensitively because encoding/json also matches them that way.
+// Malformed JSON is left for the real decode to report.
+func duplicateField(body []byte) (string, bool) {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return "", false
+	}
+	seen := make(map[string]bool)
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return "", false
+		}
+		name, ok := tok.(string)
+		if !ok {
+			return "", false
+		}
+		if seen[strings.ToLower(name)] {
+			return name, true
+		}
+		seen[strings.ToLower(name)] = true
+
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			return "", false
+		}
+	}
+	return "", false
+}
+
+// jsonTypeName describes a Go type the way a client sees it in JSON.
+func jsonTypeName(t reflect.Type) string {
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "an integer"
+	case reflect.String:
+		return "a string"
+	case reflect.Bool:
+		return "a boolean"
+	default:
+		return "of a different type"
+	}
 }
 
 func invalidJSONMessage(err error) string {
@@ -55,7 +115,7 @@ func invalidJSONMessage(err error) string {
 	case errors.As(err, &typeErr) && typeErr.Field == "":
 		return "request body must be a JSON object"
 	case errors.As(err, &typeErr):
-		return fmt.Sprintf("field %q must be of type %s", typeErr.Field, typeErr.Type)
+		return fmt.Sprintf("field %q must be %s", typeErr.Field, jsonTypeName(typeErr.Type))
 	case strings.HasPrefix(err.Error(), "json: unknown field "):
 		// encoding/json has no typed error for unknown fields.
 		return strings.TrimPrefix(err.Error(), "json: ")

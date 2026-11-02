@@ -7,7 +7,7 @@ ifeq ($(RACE),1)
 TEST_FLAGS := -race
 endif
 
-.PHONY: build run test test-unit lint
+.PHONY: build run test test-unit lint demo
 
 build:
 	go build -o $(BIN) ./cmd/api
@@ -25,3 +25,7 @@ test-unit:
 
 lint:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
+
+# End-to-end walkthrough against a running API (docker compose up). API_URL overrides the target.
+demo:
+	bash scripts/demo.sh
