@@ -91,6 +91,13 @@ func (h *handlers) writeError(w http.ResponseWriter, r *http.Request, err error)
 		status, code = http.StatusBadRequest, "invalid_idempotency_key"
 	case errors.Is(err, account.ErrIdempotencyKeyReused):
 		status, code = http.StatusConflict, "idempotency_key_reused"
+	case errors.Is(err, account.ErrTransferAccountNotFound):
+		// 422, not 404: the account is referenced in the body, not the URL.
+		status, code = http.StatusUnprocessableEntity, "account_not_found"
+	case errors.Is(err, account.ErrSameAccount):
+		status, code = http.StatusUnprocessableEntity, "same_account"
+	case errors.Is(err, account.ErrInsufficientFunds):
+		status, code = http.StatusUnprocessableEntity, "insufficient_funds"
 	default:
 		h.logger.ErrorContext(r.Context(), "request failed", "method", r.Method, "path", r.URL.Path, "err", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{errorDetail{

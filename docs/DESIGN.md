@@ -26,7 +26,7 @@
 
 A transfer runs in a single database transaction:
 
-1. Lock both account rows with `SELECT … FOR UPDATE`, always in ascending ID order.
+1. Lock both account rows with `SELECT … FOR UPDATE`, always in ascending ID order. The IDs are sorted in Go and locked with two separate statements, lower ID first, so the lock order is explicit in the code rather than relying on how Postgres executes `ORDER BY … FOR UPDATE` in a single statement (one extra round trip).
 2. Check that both accounts exist and that the source has sufficient funds.
 3. Update both balances, insert the transaction and its two ledger entries, and commit.
 
@@ -59,7 +59,7 @@ A test runs many concurrent transfers in both directions between the same accoun
 | `POST /v1/accounts` | `{"initial_balance":0}` | `201` + account, `Location` header | `400` bad JSON, `422` negative balance |
 | `GET /v1/accounts/{id}` | — | `200` + account | `400` invalid UUID, `404` not found |
 | `POST /v1/accounts/{id}/deposits` | `{"amount":5000}` + `Idempotency-Key` header | `201` + transaction | `400` bad JSON / missing key, `404` account not found, `422` amount ≤ 0 or balance overflow, `409` key reused with a different request |
-| `POST /v1/transfers` | `{"from_account_id":"…","to_account_id":"…","amount":2500}` + `Idempotency-Key` | `201` + transaction | `400` bad JSON / missing key, `422` account not found / insufficient funds / same account / amount ≤ 0, `409` key reused with a different request |
+| `POST /v1/transfers` | `{"from_account_id":"…","to_account_id":"…","amount":2500}` + `Idempotency-Key` | `201` + transaction | `400` bad JSON / missing or malformed account ID / missing key, `422` `account_not_found` / `insufficient_funds` / `same_account` / `invalid_amount`, `409` key reused with a different request |
 | `GET /v1/accounts/{id}/transactions` (optional) | — | `200` + list, newest first | `400` invalid UUID, `404` not found |
 
 **API design choices**
@@ -67,6 +67,7 @@ A test runs many concurrent transfers in both directions between the same accoun
 - **Deposits are nested under the account** because a deposit belongs to exactly one account. **Transfers are top-level** because they involve two accounts equally and are a resource in their own right.
 - **Movements are nouns created with POST**, not actions like `/transfer-money`. Each deposit or transfer is an addressable resource.
 - **400 vs 422:** `400` means the request is malformed (invalid JSON, wrong types, missing required header). `422` means the request is well-formed but a business rule rejects it. Insufficient funds is a `422`; `409` is a common alternative.
-- **Missing accounts in a transfer return 422, not 404:** the `/v1/transfers` resource exists; an unknown account ID in the body is invalid input to it. `404` is reserved for a resource in the URL path that does not exist (as in the deposit route).
+- **Missing accounts in a transfer return 422, not 404:** the `/v1/transfers` resource exists; an unknown account ID in the body is invalid input to it. `404` is reserved for a resource in the URL path that does not exist (as in the deposit route). The error code is the same `account_not_found` used elsewhere; the message names the side (source or destination).
+- **A missing or malformed account ID in a transfer body is a `400`**, following the 400-vs-422 rule: the request is malformed. An ID that is well-formed but unknown is a `422`.
 - **Errors** have one consistent shape: `{"error":{"code":"insufficient_funds","message":"…"}}`. Clients branch on `code`, never on the message text.
 - **`/v1/` prefix** allows breaking changes to be introduced under a new version without affecting existing clients.

@@ -54,6 +54,27 @@ func (s *Service) Deposit(ctx context.Context, accountID uuid.UUID, amount int64
 	})
 }
 
+// Transfer moves amount between two accounts, at most once per idempotency key.
+func (s *Service) Transfer(ctx context.Context, from, to uuid.UUID, amount int64, idempotencyKey string) (Transaction, error) {
+	if from == to {
+		return Transaction{}, ErrSameAccount
+	}
+	if amount <= 0 {
+		return Transaction{}, fmt.Errorf("%w: amount must be positive", ErrInvalidAmount)
+	}
+	if err := validateIdempotencyKey(idempotencyKey); err != nil {
+		return Transaction{}, err
+	}
+
+	return s.repo.Transfer(ctx, TransferInput{
+		FromAccountID:  from,
+		ToAccountID:    to,
+		Amount:         amount,
+		IdempotencyKey: idempotencyKey,
+		RequestHash:    requestHash(TypeTransfer, from.String(), to.String(), strconv.FormatInt(amount, 10)),
+	})
+}
+
 func validateIdempotencyKey(key string) error {
 	if key == "" || utf8.RuneCountInString(key) > MaxIdempotencyKeyLength {
 		return fmt.Errorf("%w: Idempotency-Key header is required and must be 1-%d characters",

@@ -17,20 +17,24 @@ type depositRequest struct {
 
 // transactionResponse has type-specific account fields; unused ones are omitted.
 type transactionResponse struct {
-	ID        uuid.UUID `json:"id"`
-	Type      string    `json:"type"`
-	AccountID uuid.UUID `json:"account_id,omitzero"`
-	Amount    int64     `json:"amount"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            uuid.UUID `json:"id"`
+	Type          string    `json:"type"`
+	AccountID     uuid.UUID `json:"account_id,omitzero"`
+	FromAccountID uuid.UUID `json:"from_account_id,omitzero"`
+	ToAccountID   uuid.UUID `json:"to_account_id,omitzero"`
+	Amount        int64     `json:"amount"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 func toTransactionResponse(t account.Transaction) transactionResponse {
 	return transactionResponse{
-		ID:        t.ID,
-		Type:      string(t.Type),
-		AccountID: t.AccountID,
-		Amount:    t.Amount,
-		CreatedAt: t.CreatedAt,
+		ID:            t.ID,
+		Type:          string(t.Type),
+		AccountID:     t.AccountID,
+		FromAccountID: t.FromAccountID,
+		ToAccountID:   t.ToAccountID,
+		Amount:        t.Amount,
+		CreatedAt:     t.CreatedAt,
 	}
 }
 

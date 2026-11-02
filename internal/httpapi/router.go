@@ -24,6 +24,7 @@ func NewRouter(logger *slog.Logger, db Pinger, accounts *account.Service) http.H
 	mux.HandleFunc("POST /v1/accounts", h.createAccount)
 	mux.HandleFunc("GET /v1/accounts/{id}", h.getAccount)
 	mux.HandleFunc("POST /v1/accounts/{id}/deposits", h.createDeposit)
+	mux.HandleFunc("POST /v1/transfers", h.createTransfer)
 	return mux
 }
 

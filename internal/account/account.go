@@ -26,13 +26,25 @@ const (
 )
 
 // Transaction is a recorded money movement. Which account fields are set
-// depends on Type: AccountID for opening and deposit.
+// depends on Type: AccountID for opening and deposit; FromAccountID and
+// ToAccountID for transfer.
 type Transaction struct {
-	ID        uuid.UUID
-	Type      TransactionType
-	AccountID uuid.UUID
-	Amount    int64
-	CreatedAt time.Time
+	ID            uuid.UUID
+	Type          TransactionType
+	AccountID     uuid.UUID
+	FromAccountID uuid.UUID
+	ToAccountID   uuid.UUID
+	Amount        int64
+	CreatedAt     time.Time
+}
+
+// TransferInput is a validated transfer, ready to be stored.
+type TransferInput struct {
+	FromAccountID  uuid.UUID
+	ToAccountID    uuid.UUID
+	Amount         int64
+	IdempotencyKey string
+	RequestHash    string
 }
 
 // DepositInput is a validated deposit, ready to be stored.
@@ -55,6 +67,14 @@ var (
 	// ErrIdempotencyKeyReused is returned when an idempotency key was already
 	// used for a different request.
 	ErrIdempotencyKeyReused = errors.New("idempotency key already used for a different request")
+	// ErrSameAccount is returned for a transfer from an account to itself.
+	ErrSameAccount = errors.New("source and destination accounts must differ")
+	// ErrInsufficientFunds is returned when a transfer would make the source balance negative.
+	ErrInsufficientFunds = errors.New("insufficient funds")
+	// ErrTransferAccountNotFound is returned when an account referenced in a
+	// transfer body does not exist. Unlike ErrNotFound, the account is not the
+	// resource addressed by the request.
+	ErrTransferAccountNotFound = errors.New("account not found")
 )
 
 // Repository is the persistence the account service needs.
@@ -65,4 +85,8 @@ type Repository interface {
 	// with the same RequestHash returns the original transaction; a different
 	// RequestHash returns ErrIdempotencyKeyReused.
 	Deposit(ctx context.Context, in DepositInput) (Transaction, error)
+	// Transfer moves money atomically, at most once per idempotency key, with
+	// the same replay semantics as Deposit. It returns ErrTransferAccountNotFound
+	// or ErrInsufficientFunds when the transfer cannot be applied.
+	Transfer(ctx context.Context, in TransferInput) (Transaction, error)
 }
